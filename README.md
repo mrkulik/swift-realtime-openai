@@ -168,6 +168,45 @@ The `TimestampedMessage` struct provides:
 
 This is ideal for building conversation list UIs where you need to display messages chronologically with timestamps. The `text` property automatically extracts readable content whether the message contains text or audio with transcripts. Since `TimestampedMessage` conforms to `Identifiable`, you can use it directly in SwiftUI `ForEach` loops.
 
+#### Observing all dialog events including streaming and interruptions
+
+For comprehensive dialog logging and real-time UI updates, you can subscribe to the `dialogEvents` publisher, which captures all communication including partial messages and interruptions:
+
+```swift
+import Combine
+
+@State private var cancellables = Set<AnyCancellable>()
+@State private var dialogLog: [DialogEvent] = []
+
+// Subscribe to all dialog events
+conversation.dialogEvents
+    .sink { dialogEvent in
+        dialogLog.append(dialogEvent)
+        
+        switch dialogEvent.eventType {
+        case .messageStarted:
+            print("🟡 Started: \(dialogEvent.role)")
+        case .messageUpdated:
+            print("⚪ Streaming: \(dialogEvent.text)")
+        case .messageCompleted:
+            print("🟢 Completed: \(dialogEvent.text)")
+        case .messageInterrupted:
+            print("🔴 Interrupted: \(dialogEvent.text)")
+        }
+    }
+    .store(in: &cancellables)
+```
+
+The `DialogEvent` struct provides:
+- `id`: The unique identifier from the original message
+- `timestamp`: When this specific event occurred
+- `eventType`: `.messageStarted`, `.messageUpdated`, `.messageCompleted`, or `.messageInterrupted`
+- `role`: The message role (`.user`, `.assistant`, or `.system`)
+- `text`: The current text content (may be partial during streaming)
+- `wasInterrupted`: Whether this message was interrupted before completion
+
+This captures everything that was actually said and heard, including partial responses that get interrupted when users speak over the assistant.
+
 #### Customizing the session
 
 You can customize the current session using the `setSession(_: Session)` or `updateSession(withChanges: (inout Session) -> Void)` methods. Note that they requires that a session has already been established, so it's recommended you call them from a `whenConnected(_: @Sendable () async throws -> Void)` callback or await `waitForConnection()` first. For example:
