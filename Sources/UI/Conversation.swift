@@ -2,11 +2,30 @@ import Core
 import WebRTC
 import AVFAudio
 import Foundation
+import Combine
 
 public enum ConversationError: Error {
 	case sessionNotFound
 	case invalidEphemeralKey
 	case converterInitializationFailed
+}
+
+/// A timestamped message for UI display in conversation lists
+public struct TimestampedMessage: Sendable {
+	/// The timestamp when the message was completed
+	public let timestamp: Date
+	
+	/// The complete message
+	public let message: Item.Message
+	
+	/// The role of the message (user, assistant, system)
+	public let role: Item.Message.Role
+	
+	public init(timestamp: Date = Date(), message: Item.Message) {
+		self.timestamp = timestamp
+		self.message = message
+		self.role = message.role
+	}
 }
 
 @MainActor @Observable
@@ -17,6 +36,7 @@ public final class Conversation: @unchecked Sendable {
 	private var task: Task<Void, Error>!
 	private let sessionUpdateCallback: SessionUpdateCallback?
 	private let errorStream: AsyncStream<ServerError>.Continuation
+	private let messageSubject = PassthroughSubject<TimestampedMessage, Never>()
 
 	/// Whether to print debug information to the console.
 	public var debug: Bool
@@ -33,6 +53,11 @@ public final class Conversation: @unchecked Sendable {
 
 	/// A stream of errors that occur during the conversation.
 	public let errors: AsyncStream<ServerError>
+	
+	/// A Combine publisher that emits complete timestamped messages for UI display
+	public var messageUpdates: AnyPublisher<TimestampedMessage, Never> {
+		messageSubject.eraseToAnyPublisher()
+	}
 
 	/// The current session for this conversation.
 	public private(set) var session: Session?
@@ -178,6 +203,11 @@ private extension Conversation {
 				self.session = session
 			case let .conversationItemCreated(_, item, _):
 				entries.append(item)
+				// Emit complete input messages immediately
+				if case let .message(message) = item, message.role == .user {
+					let timestampedMessage = TimestampedMessage(message: message)
+					messageSubject.send(timestampedMessage)
+				}
 			case let .conversationItemDeleted(_, itemId):
 				entries.removeAll { $0.id == itemId }
 			case let .conversationItemInputAudioTranscriptionCompleted(_, itemId, contentIndex, transcript, _, _):
@@ -249,6 +279,11 @@ private extension Conversation {
 					guard case let .message(newMessage) = item else { return }
 
 					message = newMessage
+				}
+				// Emit complete assistant messages when done
+				if case let .message(message) = item, message.role == .assistant {
+					let timestampedMessage = TimestampedMessage(message: message)
+					messageSubject.send(timestampedMessage)
 				}
 			default: break
 		}
