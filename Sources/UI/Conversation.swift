@@ -11,7 +11,10 @@ public enum ConversationError: Error {
 }
 
 /// A timestamped message for UI display in conversation lists
-public struct TimestampedMessage: Sendable {
+public struct TimestampedMessage: Sendable, Identifiable {
+	/// The unique ID of the message
+	public let id: String
+	
 	/// The timestamp when the message was completed
 	public let timestamp: Date
 	
@@ -25,6 +28,7 @@ public struct TimestampedMessage: Sendable {
 	public let text: String
 	
 	public init(timestamp: Date = Date(), message: Item.Message) {
+		self.id = message.id
 		self.timestamp = timestamp
 		self.message = message
 		self.role = message.role

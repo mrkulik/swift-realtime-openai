@@ -160,12 +160,13 @@ conversation.messageUpdates
 ```
 
 The `TimestampedMessage` struct provides:
+- `id`: The unique identifier from the original message
 - `timestamp`: When the message was completed
 - `message`: The complete `Item.Message` object
 - `role`: The message role (`.user`, `.assistant`, or `.system`)
 - `text`: The text content (extracted from text messages or audio transcripts)
 
-This is ideal for building conversation list UIs where you need to display messages chronologically with timestamps. The `text` property automatically extracts readable content whether the message contains text or audio with transcripts.
+This is ideal for building conversation list UIs where you need to display messages chronologically with timestamps. The `text` property automatically extracts readable content whether the message contains text or audio with transcripts. Since `TimestampedMessage` conforms to `Identifiable`, you can use it directly in SwiftUI `ForEach` loops.
 
 #### Customizing the session
 
