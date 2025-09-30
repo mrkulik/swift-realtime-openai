@@ -142,7 +142,7 @@ ScrollView {
 
 #### Observing message updates with Combine
 
-For reactive UI updates, you can subscribe to the `messageUpdates` publisher, which emits `TimestampedMessage` objects containing complete messages with timestamps:
+For reactive UI updates, you can subscribe to the `messageUpdates` publisher, which emits `TimestampedMessage` objects for all message activity including streaming updates:
 
 ```swift
 import Combine
@@ -152,7 +152,7 @@ import Combine
 // Subscribe to message updates
 conversation.messageUpdates
     .sink { timestampedMessage in
-        print("[\(timestampedMessage.timestamp)] \(timestampedMessage.role): \(timestampedMessage.message)")
+        print("[\(timestampedMessage.timestamp)] \(timestampedMessage.role): \(timestampedMessage.text)")
         // Update your conversation list UI here
         updateConversationList(with: timestampedMessage)
     }
@@ -161,51 +161,17 @@ conversation.messageUpdates
 
 The `TimestampedMessage` struct provides:
 - `id`: The unique identifier from the original message
-- `timestamp`: When the message was completed
+- `timestamp`: When this message update occurred
 - `message`: The complete `Item.Message` object
 - `role`: The message role (`.user`, `.assistant`, or `.system`)
 - `text`: The text content (extracted from text messages or audio transcripts)
 
-This is ideal for building conversation list UIs where you need to display messages chronologically with timestamps. The `text` property automatically extracts readable content whether the message contains text or audio with transcripts. Since `TimestampedMessage` conforms to `Identifiable`, you can use it directly in SwiftUI `ForEach` loops.
+This publisher emits:
+- **User messages**: Immediately when sent
+- **Assistant messages**: During streaming (as text builds up) and when complete
+- **All message updates**: Real-time as content changes
 
-#### Observing all dialog events including streaming and interruptions
-
-For comprehensive dialog logging and real-time UI updates, you can subscribe to the `dialogEvents` publisher, which captures all communication including partial messages and interruptions:
-
-```swift
-import Combine
-
-@State private var cancellables = Set<AnyCancellable>()
-@State private var dialogLog: [DialogEvent] = []
-
-// Subscribe to all dialog events
-conversation.dialogEvents
-    .sink { dialogEvent in
-        dialogLog.append(dialogEvent)
-        
-        switch dialogEvent.eventType {
-        case .messageStarted:
-            print("🟡 Started: \(dialogEvent.role)")
-        case .messageUpdated:
-            print("⚪ Streaming: \(dialogEvent.text)")
-        case .messageCompleted:
-            print("🟢 Completed: \(dialogEvent.text)")
-        case .messageInterrupted:
-            print("🔴 Interrupted: \(dialogEvent.text)")
-        }
-    }
-    .store(in: &cancellables)
-```
-
-The `DialogEvent` struct provides:
-- `id`: The unique identifier from the original message
-- `timestamp`: When this specific event occurred
-- `eventType`: `.messageStarted`, `.messageUpdated`, `.messageCompleted`, or `.messageInterrupted`
-- `role`: The message role (`.user`, `.assistant`, or `.system`)
-- `text`: The current text content (may be partial during streaming)
-- `wasInterrupted`: Whether this message was interrupted before completion
-
-This captures everything that was actually said and heard, including partial responses that get interrupted when users speak over the assistant.
+The `text` property automatically extracts readable content whether the message contains text or audio with transcripts. Since `TimestampedMessage` conforms to `Identifiable`, you can use it directly in SwiftUI `ForEach` loops for building conversation UIs that update in real-time as the assistant responds.
 
 #### Customizing the session
 

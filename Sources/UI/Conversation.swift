@@ -10,59 +10,6 @@ public enum ConversationError: Error {
 	case converterInitializationFailed
 }
 
-/// Represents the type of dialog event
-public enum DialogEventType: Sendable {
-	case messageStarted
-	case messageUpdated
-	case messageCompleted
-	case messageInterrupted
-}
-
-/// A dialog event capturing all communication including partial and interrupted messages
-public struct DialogEvent: Sendable, Identifiable {
-	/// The unique ID of the message
-	public let id: String
-	
-	/// The timestamp when this event occurred
-	public let timestamp: Date
-	
-	/// The type of dialog event
-	public let eventType: DialogEventType
-	
-	/// The role of the message (user, assistant, system)
-	public let role: Item.Message.Role
-	
-	/// The current text content (may be partial for streaming)
-	public let text: String
-	
-	/// Whether this message was interrupted before completion
-	public let wasInterrupted: Bool
-	
-	public init(id: String, timestamp: Date = Date(), eventType: DialogEventType, role: Item.Message.Role, text: String, wasInterrupted: Bool = false) {
-		self.id = id
-		self.timestamp = timestamp
-		self.eventType = eventType
-		self.role = role
-		self.text = text
-		self.wasInterrupted = wasInterrupted
-	}
-}
-
-/// Internal structure to track streaming messages
-private struct StreamingMessage {
-	var id: String
-	var role: Item.Message.Role
-	var startTime: Date
-	var currentText: String
-	var wasInterrupted: Bool = false
-	
-	init(id: String, role: Item.Message.Role, startTime: Date = Date(), currentText: String = "") {
-		self.id = id
-		self.role = role
-		self.startTime = startTime
-		self.currentText = currentText
-	}
-}
 
 /// A timestamped message for UI display in conversation lists
 public struct TimestampedMessage: Sendable, Identifiable {
@@ -101,8 +48,6 @@ public final class Conversation: @unchecked Sendable {
 	private let sessionUpdateCallback: SessionUpdateCallback?
 	private let errorStream: AsyncStream<ServerError>.Continuation
 	private let messageSubject = PassthroughSubject<TimestampedMessage, Never>()
-	private let dialogEventSubject = PassthroughSubject<DialogEvent, Never>()
-	private var streamingMessages: [String: StreamingMessage] = [:]
 
 	/// Whether to print debug information to the console.
 	public var debug: Bool
@@ -123,11 +68,6 @@ public final class Conversation: @unchecked Sendable {
 	/// A Combine publisher that emits complete timestamped messages for UI display
 	public var messageUpdates: AnyPublisher<TimestampedMessage, Never> {
 		messageSubject.eraseToAnyPublisher()
-	}
-	
-	/// A Combine publisher that emits all dialog events including streaming and interrupted messages
-	public var dialogEvents: AnyPublisher<DialogEvent, Never> {
-		dialogEventSubject.eraseToAnyPublisher()
 	}
 
 	/// The current session for this conversation.
@@ -275,19 +215,9 @@ private extension Conversation {
 			case let .conversationItemCreated(_, item, _):
 				entries.append(item)
 				// Emit complete input messages immediately
-				if case let .message(message) = item, message.role == .user {
+				if case let .message(message) = item {
 					let timestampedMessage = TimestampedMessage(message: message)
 					messageSubject.send(timestampedMessage)
-					
-					// Also emit as dialog event
-					let text = message.content.compactMap { $0.text }.joined(separator: " ")
-					let dialogEvent = DialogEvent(
-						id: message.id,
-						eventType: .messageCompleted,
-						role: message.role,
-						text: text
-					)
-					dialogEventSubject.send(dialogEvent)
 				}
 			case let .conversationItemDeleted(_, itemId):
 				entries.removeAll { $0.id == itemId }
@@ -301,54 +231,15 @@ private extension Conversation {
 				errorStream.yield(error)
 				print("Received error: \(error)")
 			case let .conversationItemTruncated(_, itemId, _, _):
-				// Mark streaming message as interrupted due to truncation
-				if var streaming = streamingMessages[itemId] {
-					streaming.wasInterrupted = true
-					streamingMessages[itemId] = streaming
-					
-					let dialogEvent = DialogEvent(
-						id: itemId,
-						eventType: .messageInterrupted,
-						role: streaming.role,
-						text: streaming.currentText,
-						wasInterrupted: true
-					)
-					dialogEventSubject.send(dialogEvent)
-				}
+				// Handle truncation if needed
+				break
 			case let .responseCreated(_, response):
 				if id == nil {
 					id = response.conversationId
 				}
-				// Mark any currently streaming messages as interrupted
-				for (itemId, var streaming) in streamingMessages {
-					if !streaming.wasInterrupted {
-						streaming.wasInterrupted = true
-						streamingMessages[itemId] = streaming
-						
-						let dialogEvent = DialogEvent(
-							id: itemId,
-							eventType: .messageInterrupted,
-							role: streaming.role,
-							text: streaming.currentText,
-							wasInterrupted: true
-						)
-						dialogEventSubject.send(dialogEvent)
-					}
-				}
 			case let .responseContentPartAdded(_, _, itemId, _, contentIndex, part):
 				updateEvent(id: itemId) { message in
 					message.content.insert(.init(from: part), at: contentIndex)
-				}
-				// Start tracking streaming message
-				if streamingMessages[itemId] == nil {
-					streamingMessages[itemId] = StreamingMessage(id: itemId, role: .assistant)
-					let dialogEvent = DialogEvent(
-						id: itemId,
-						eventType: .messageStarted,
-						role: .assistant,
-						text: ""
-					)
-					dialogEventSubject.send(dialogEvent)
 				}
 			case let .responseContentPartDone(_, _, itemId, _, contentIndex, part):
 				updateEvent(id: itemId) { message in
@@ -360,19 +251,6 @@ private extension Conversation {
 
 					message.content[contentIndex] = .text(text + delta)
 				}
-				// Update streaming message
-				if var streaming = streamingMessages[itemId] {
-					streaming.currentText += delta
-					streamingMessages[itemId] = streaming
-					
-					let dialogEvent = DialogEvent(
-						id: itemId,
-						eventType: .messageUpdated,
-						role: .assistant,
-						text: streaming.currentText
-					)
-					dialogEventSubject.send(dialogEvent)
-				}
 			case let .responseTextDone(_, _, itemId, _, contentIndex, text):
 				updateEvent(id: itemId) { message in
 					message.content[contentIndex] = .text(text)
@@ -382,19 +260,6 @@ private extension Conversation {
 					guard case let .audio(audio) = message.content[contentIndex] else { return }
 
 					message.content[contentIndex] = .audio(.init(audio: audio.audio, transcript: (audio.transcript ?? "") + delta))
-				}
-				// Update streaming message with audio transcript
-				if var streaming = streamingMessages[itemId] {
-					streaming.currentText += delta
-					streamingMessages[itemId] = streaming
-					
-					let dialogEvent = DialogEvent(
-						id: itemId,
-						eventType: .messageUpdated,
-						role: .assistant,
-						text: streaming.currentText
-					)
-					dialogEventSubject.send(dialogEvent)
 				}
 			case let .responseAudioTranscriptDone(_, _, itemId, _, contentIndex, transcript):
 				updateEvent(id: itemId) { message in
@@ -429,25 +294,6 @@ private extension Conversation {
 
 					message = newMessage
 				}
-				// Emit complete assistant messages when done
-				if case let .message(message) = item, message.role == .assistant {
-					let timestampedMessage = TimestampedMessage(message: message)
-					messageSubject.send(timestampedMessage)
-					
-					// Emit final dialog event
-					let finalText = message.content.compactMap { $0.text }.joined(separator: " ")
-					let dialogEvent = DialogEvent(
-						id: message.id,
-						eventType: .messageCompleted,
-						role: .assistant,
-						text: finalText,
-						wasInterrupted: streamingMessages[message.id]?.wasInterrupted ?? false
-					)
-					dialogEventSubject.send(dialogEvent)
-					
-					// Clean up streaming message
-					streamingMessages.removeValue(forKey: message.id)
-				}
 			default: break
 		}
 	}
@@ -460,6 +306,10 @@ private extension Conversation {
 		closure(&message)
 
 		entries[index] = .message(message)
+		
+		// Emit updated message
+		let timestampedMessage = TimestampedMessage(message: message)
+		messageSubject.send(timestampedMessage)
 	}
 
 	func updateEvent(id: String, modifying closure: (inout Item.FunctionCall) -> Void) {
