@@ -140,6 +140,32 @@ ScrollView {
 }
 ```
 
+#### Observing message updates with Combine
+
+For reactive UI updates, you can subscribe to the `messageUpdates` publisher, which emits `TimestampedMessage` objects containing complete messages with timestamps:
+
+```swift
+import Combine
+
+@State private var cancellables = Set<AnyCancellable>()
+
+// Subscribe to message updates
+conversation.messageUpdates
+    .sink { timestampedMessage in
+        print("[\(timestampedMessage.timestamp)] \(timestampedMessage.role): \(timestampedMessage.message)")
+        // Update your conversation list UI here
+        updateConversationList(with: timestampedMessage)
+    }
+    .store(in: &cancellables)
+```
+
+The `TimestampedMessage` struct provides:
+- `timestamp`: When the message was completed
+- `message`: The complete `Item.Message` object
+- `role`: The message role (`.user`, `.assistant`, or `.system`)
+
+This is ideal for building conversation list UIs where you need to display messages chronologically with timestamps.
+
 #### Customizing the session
 
 You can customize the current session using the `setSession(_: Session)` or `updateSession(withChanges: (inout Session) -> Void)` methods. Note that they requires that a session has already been established, so it's recommended you call them from a `whenConnected(_: @Sendable () async throws -> Void)` callback or await `waitForConnection()` first. For example:
