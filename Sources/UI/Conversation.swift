@@ -122,6 +122,13 @@ public final class Conversation: @unchecked Sendable {
 		client.disconnect()
 		errorStream.finish()
 	}
+	
+	/// Disconnect from the conversation
+	public func disconnect() {
+		client.disconnect()
+		task?.cancel()
+		errorStream.finish()
+	}
 
 	public func connect(using request: URLRequest) async throws {
 		await AVAudioApplication.requestRecordPermission()
