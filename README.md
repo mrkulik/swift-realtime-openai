@@ -163,8 +163,9 @@ The `TimestampedMessage` struct provides:
 - `timestamp`: When the message was completed
 - `message`: The complete `Item.Message` object
 - `role`: The message role (`.user`, `.assistant`, or `.system`)
+- `text`: The text content (extracted from text messages or audio transcripts)
 
-This is ideal for building conversation list UIs where you need to display messages chronologically with timestamps.
+This is ideal for building conversation list UIs where you need to display messages chronologically with timestamps. The `text` property automatically extracts readable content whether the message contains text or audio with transcripts.
 
 #### Customizing the session
 

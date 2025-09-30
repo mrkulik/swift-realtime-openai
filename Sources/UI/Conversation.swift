@@ -21,10 +21,16 @@ public struct TimestampedMessage: Sendable {
 	/// The role of the message (user, assistant, system)
 	public let role: Item.Message.Role
 	
+	/// The text content of the message (extracted from text or audio transcript)
+	public let text: String
+	
 	public init(timestamp: Date = Date(), message: Item.Message) {
 		self.timestamp = timestamp
 		self.message = message
 		self.role = message.role
+		
+		// Extract text from all content parts (text and audio transcripts)
+		self.text = message.content.compactMap { $0.text }.joined(separator: " ")
 	}
 }
 
