@@ -74,7 +74,16 @@ public final class Conversation: @unchecked Sendable {
 	public private(set) var session: Session?
 
 	/// A list of items in the conversation.
-	public private(set) var entries: [Item] = []
+	public private(set) var entries: [Item] = [] {
+		didSet {
+			// Emit all messages whenever entries change
+			for message in messages {
+				let timestampedMessage = TimestampedMessage(message: message)
+				print("EMIT ENTRIES CHANGED: \(message.role) - \(timestampedMessage.text)")
+				messageSubject.send(timestampedMessage)
+			}
+		}
+	}
 
 	public var status: RealtimeAPI.Status {
 		client.status
