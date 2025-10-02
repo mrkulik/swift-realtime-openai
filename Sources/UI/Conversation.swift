@@ -33,6 +33,7 @@ public struct TimestampedMessage: Sendable, Identifiable {
 		self.timestamp = timestamp
 		self.message = message
 		self.role = message.role
+		print("ROLE DEBUG: TimestampedMessage init with role: \(message.role)")
 		
 		// Extract text from all content parts (text and audio transcripts)
 		self.text = message.content.compactMap { $0.text }.joined(separator: " ")
@@ -74,16 +75,7 @@ public final class Conversation: @unchecked Sendable {
 	public private(set) var session: Session?
 
 	/// A list of items in the conversation.
-	public private(set) var entries: [Item] = [] {
-		didSet {
-			// Emit all messages whenever entries change
-			for message in messages {
-				let timestampedMessage = TimestampedMessage(message: message)
-				print("EMIT ENTRIES CHANGED: \(message.role) - \(timestampedMessage.text)")
-				messageSubject.send(timestampedMessage)
-			}
-		}
-	}
+	public private(set) var entries: [Item] = []
 
 	public var status: RealtimeAPI.Status {
 		client.status
@@ -99,10 +91,14 @@ public final class Conversation: @unchecked Sendable {
 	/// A list of messages in the conversation.
 	/// Note that this doesn't include function call events. To get a complete list, use `entries`.
 	public var messages: [Item.Message] {
-		entries.compactMap { switch $0 {
+		let msgs = entries.compactMap { switch $0 {
 			case let .message(message): return message
 			default: return nil
 		} }
+		for msg in msgs {
+			print("ROLE DEBUG: messages getter found message with role: \(msg.role)")
+		}
+		return msgs
 	}
 
 	public required init(debug: Bool = false, configuring sessionUpdateCallback: SessionUpdateCallback? = nil) {
@@ -189,18 +185,6 @@ public final class Conversation: @unchecked Sendable {
 	/// Send a client event to the server.
 	/// > Warning: This function is intended for advanced use cases. Use the other functions to send messages and audio data.
 	public func send(event: ClientEvent) throws {
-		// Also emit text messages when sending client events
-		switch event {
-			case let .createConversationItem(_, _, item):
-				if case let .message(message) = item {
-					let timestampedMessage = TimestampedMessage(message: message)
-					print("EMIT CLIENT EVENT: \(message.role) - \(timestampedMessage.text)")
-					messageSubject.send(timestampedMessage)
-				}
-			default:
-				break
-		}
-		
 		try client.send(event: event)
 	}
 
@@ -216,14 +200,8 @@ public final class Conversation: @unchecked Sendable {
 	/// Send a text message and wait for a response.
 	/// Optionally, you can provide a response configuration to customize the model's behavior.
 	public func send(from role: Item.Message.Role, text: String, response: Response.Config? = nil) throws {
-		let message = Item.Message(id: String(randomLength: 32), role: role, content: [.inputText(text)])
-		
-		// Immediately emit the user message
-		let timestampedMessage = TimestampedMessage(message: message)
-		print("EMIT INPUT: \(role) - \(text)")
-		messageSubject.send(timestampedMessage)
-		
-		try send(event: .createConversationItem(.message(message)))
+		print("ROLE DEBUG: send() called with role: \(role), text: \(text)")
+		try send(event: .createConversationItem(.message(Item.Message(id: String(randomLength: 32), role: role, content: [.inputText(text)]))))
 		try send(event: .createResponse(using: response))
 	}
 
@@ -237,36 +215,6 @@ public final class Conversation: @unchecked Sendable {
 private extension Conversation {
 	func handleEvent(_ event: ServerEvent) throws {
 		if debug { print(event) }
-		
-		// Try to extract and emit any text content from any event
-		switch event {
-			case let .conversationItemInputAudioTranscriptionCompleted(_, itemId, _, transcript, _, _):
-				print("EMIT TRANSCRIPT: \(transcript)")
-				// Create a synthetic message for transcription
-				let message = Item.Message(id: itemId, role: .user, content: [.inputText(transcript)])
-				let timestampedMessage = TimestampedMessage(message: message)
-				messageSubject.send(timestampedMessage)
-			case let .conversationItemInputAudioTranscriptionDelta(_, itemId, _, delta, _):
-				print("EMIT TRANSCRIPT DELTA: \(delta)")
-				// Create a synthetic message for transcription delta
-				let message = Item.Message(id: itemId, role: .user, content: [.inputText(delta)])
-				let timestampedMessage = TimestampedMessage(message: message)
-				messageSubject.send(timestampedMessage)
-			case let .responseTextDelta(_, _, itemId, _, _, delta):
-				print("EMIT TEXT DELTA: \(delta)")
-				// Create a synthetic message for text delta
-				let message = Item.Message(id: itemId, role: .assistant, content: [.text(delta)])
-				let timestampedMessage = TimestampedMessage(message: message)
-				messageSubject.send(timestampedMessage)
-			case let .responseTextDone(_, _, itemId, _, _, text):
-				print("EMIT TEXT DONE: \(text)")
-				// Create a synthetic message for completed text
-				let message = Item.Message(id: itemId, role: .assistant, content: [.text(text)])
-				let timestampedMessage = TimestampedMessage(message: message)
-				messageSubject.send(timestampedMessage)
-			default:
-				break
-		}
 
 		switch event {
 			case let .error(_, error):
@@ -278,13 +226,10 @@ private extension Conversation {
 			case let .sessionUpdated(_, session):
 				self.session = session
 			case let .conversationItemCreated(_, item, _):
-				entries.append(item)
-				// Emit all messages (both user and assistant)
 				if case let .message(message) = item {
-					let timestampedMessage = TimestampedMessage(message: message)
-					print("EMIT CREATED: \(message.role) - \(timestampedMessage.text)")
-					messageSubject.send(timestampedMessage)
+					print("ROLE DEBUG: conversationItemCreated with message role: \(message.role)")
 				}
+				entries.append(item)
 			case let .conversationItemDeleted(_, itemId):
 				entries.removeAll { $0.id == itemId }
 			case let .conversationItemInputAudioTranscriptionCompleted(_, itemId, contentIndex, transcript, _, _):
@@ -304,13 +249,10 @@ private extension Conversation {
 					id = response.conversationId
 				}
 			case let .responseOutputItemAdded(_, _, _, item):
-				entries.append(item)
-				// Emit new assistant messages when they're added
 				if case let .message(message) = item {
-					let timestampedMessage = TimestampedMessage(message: message)
-					print("EMIT RESPONSE ADDED: \(message.role) - \(timestampedMessage.text)")
-					messageSubject.send(timestampedMessage)
+					print("ROLE DEBUG: responseOutputItemAdded with message role: \(message.role)")
 				}
+				entries.append(item)
 			case let .responseContentPartAdded(_, _, itemId, _, contentIndex, part):
 				updateEvent(id: itemId) { message in
 					message.content.insert(.init(from: part), at: contentIndex)
@@ -368,11 +310,6 @@ private extension Conversation {
 
 					message = newMessage
 				}
-				// Also emit message for new assistant responses
-				if case let .message(message) = item {
-					let timestampedMessage = TimestampedMessage(message: message)
-					messageSubject.send(timestampedMessage)
-				}
 			default: break
 		}
 	}
@@ -381,15 +318,12 @@ private extension Conversation {
 		guard let index = entries.firstIndex(where: { $0.id == id }), case var .message(message) = entries[index] else {
 			return
 		}
-
+		
+		print("ROLE DEBUG: updateEvent for message with role: \(message.role)")
 		closure(&message)
 
 		entries[index] = .message(message)
 		
-		// Emit updated message
-		let timestampedMessage = TimestampedMessage(message: message)
-		print("EMIT UPDATED: \(message.role) - \(timestampedMessage.text)")
-		messageSubject.send(timestampedMessage)
 	}
 
 	func updateEvent(id: String, modifying closure: (inout Item.FunctionCall) -> Void) {
