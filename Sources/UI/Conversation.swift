@@ -195,7 +195,13 @@ public final class Conversation: @unchecked Sendable {
 	/// Send a text message and wait for a response.
 	/// Optionally, you can provide a response configuration to customize the model's behavior.
 	public func send(from role: Item.Message.Role, text: String, response: Response.Config? = nil) throws {
-		try send(event: .createConversationItem(.message(Item.Message(id: String(randomLength: 32), role: role, content: [.inputText(text)]))))
+		let message = Item.Message(id: String(randomLength: 32), role: role, content: [.inputText(text)])
+		try send(event: .createConversationItem(.message(message)))
+		
+		// Immediately emit the user message since server might not echo it back
+		let timestampedMessage = TimestampedMessage(message: message)
+		messageSubject.send(timestampedMessage)
+		
 		try send(event: .createResponse(using: response))
 	}
 
