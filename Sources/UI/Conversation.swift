@@ -221,7 +221,7 @@ private extension Conversation {
 				self.session = session
 			case let .conversationItemCreated(_, item, _):
 				entries.append(item)
-				// Emit complete input messages immediately
+				// Emit all messages (both user and assistant)
 				if case let .message(message) = item {
 					let timestampedMessage = TimestampedMessage(message: message)
 					messageSubject.send(timestampedMessage)
@@ -243,6 +243,13 @@ private extension Conversation {
 			case let .responseCreated(_, response):
 				if id == nil {
 					id = response.conversationId
+				}
+			case let .responseOutputItemAdded(_, _, _, item):
+				entries.append(item)
+				// Emit new assistant messages when they're added
+				if case let .message(message) = item {
+					let timestampedMessage = TimestampedMessage(message: message)
+					messageSubject.send(timestampedMessage)
 				}
 			case let .responseContentPartAdded(_, _, itemId, _, contentIndex, part):
 				updateEvent(id: itemId) { message in
@@ -300,6 +307,11 @@ private extension Conversation {
 					guard case let .message(newMessage) = item else { return }
 
 					message = newMessage
+				}
+				// Also emit message for new assistant responses
+				if case let .message(message) = item {
+					let timestampedMessage = TimestampedMessage(message: message)
+					messageSubject.send(timestampedMessage)
 				}
 			default: break
 		}
