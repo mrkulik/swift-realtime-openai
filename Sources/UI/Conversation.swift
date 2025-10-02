@@ -75,7 +75,18 @@ public final class Conversation: @unchecked Sendable {
 	public private(set) var session: Session?
 
 	/// A list of items in the conversation.
-	public private(set) var entries: [Item] = []
+	public private(set) var entries: [Item] = [] {
+		didSet {
+			print("ROLE DEBUG: entries changed! Now has \(entries.count) items")
+			for (index, entry) in entries.enumerated() {
+				if case let .message(message) = entry {
+					print("ROLE DEBUG: Entry \(index): MESSAGE with role: \(message.role), id: \(message.id)")
+				} else {
+					print("ROLE DEBUG: Entry \(index): NON-MESSAGE: \(entry)")
+				}
+			}
+		}
+	}
 
 	public var status: RealtimeAPI.Status {
 		client.status
@@ -185,6 +196,14 @@ public final class Conversation: @unchecked Sendable {
 	/// Send a client event to the server.
 	/// > Warning: This function is intended for advanced use cases. Use the other functions to send messages and audio data.
 	public func send(event: ClientEvent) throws {
+		switch event {
+		case let .createConversationItem(_, _, item):
+			if case let .message(message) = item {
+				print("ROLE DEBUG: send(event:) createConversationItem with message role: \(message.role)")
+			}
+		default:
+			print("ROLE DEBUG: send(event:) called with non-message event: \(event)")
+		}
 		try client.send(event: event)
 	}
 
@@ -201,7 +220,14 @@ public final class Conversation: @unchecked Sendable {
 	/// Optionally, you can provide a response configuration to customize the model's behavior.
 	public func send(from role: Item.Message.Role, text: String, response: Response.Config? = nil) throws {
 		print("ROLE DEBUG: send() called with role: \(role), text: \(text)")
-		try send(event: .createConversationItem(.message(Item.Message(id: String(randomLength: 32), role: role, content: [.inputText(text)]))))
+		let messageId = String(randomLength: 32)
+		let message = Item.Message(id: messageId, role: role, content: [.inputText(text)])
+		print("ROLE DEBUG: created message with id: \(messageId), role: \(message.role)")
+		
+		let clientEvent = ClientEvent.createConversationItem(.message(message))
+		print("ROLE DEBUG: created client event: \(clientEvent)")
+		
+		try send(event: clientEvent)
 		try send(event: .createResponse(using: response))
 	}
 
@@ -215,6 +241,7 @@ public final class Conversation: @unchecked Sendable {
 private extension Conversation {
 	func handleEvent(_ event: ServerEvent) throws {
 		if debug { print(event) }
+		print("ROLE DEBUG: handleEvent called with: \(event)")
 
 		switch event {
 			case let .error(_, error):
@@ -226,8 +253,11 @@ private extension Conversation {
 			case let .sessionUpdated(_, session):
 				self.session = session
 			case let .conversationItemCreated(_, item, _):
+				print("ROLE DEBUG: conversationItemCreated with item: \(item)")
 				if case let .message(message) = item {
-					print("ROLE DEBUG: conversationItemCreated with message role: \(message.role)")
+					print("ROLE DEBUG: conversationItemCreated MESSAGE FOUND - role: \(message.role), id: \(message.id), content: \(message.content)")
+				} else {
+					print("ROLE DEBUG: conversationItemCreated - NOT A MESSAGE: \(item)")
 				}
 				entries.append(item)
 			case let .conversationItemDeleted(_, itemId):
